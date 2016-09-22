@@ -1,0 +1,196 @@
+{
+    "Mappings" : {
+        "ENV" : {
+            "DATABASE_SERVER" : {"staging" : "", "production" : ""},
+            "DATABASE_USER" : {"staging" : "","production" : ""},
+            "DATABASE_PASSWORD" : {"staging" : "","production" : ""},
+            "CLUSTER" : {"staging" : "","production" : ""},
+            "DNSZONE" : {"staging" : "","production" : ""}
+        }
+    },
+    "Parameters" : {
+        "VpcId" : {
+            "Type" : "String",
+            "Description" : "Optional - VPC Id of existing VPC. Leave blank to have a new VPC created",
+            "Default" : "",
+            "AllowedPattern" : "^(?:vpc-[0-9a-f]{8}|)$",
+            "ConstraintDescription" : "VPC Id must begin with 'vpc-' or leave blank to have a new VPC created"
+        },
+        "EcsClusterName" : {
+            "Type" : "String",
+            "Description" : "ECS Cluster Name",
+            "Default" : "staging"
+        },
+        "SiteId" : {
+            "Type" : "String",
+            "Description" : "Customer site name"
+        },
+        "Image" : {
+            "Type" : "String",
+            "Description" : "Docker image identifier on DockerHub"
+        },
+        "Environment" : {
+            "Type" : "String",
+            "Description" : "production or staging",
+            "Default" : "staging"
+        },
+        "SourceCidr" : {
+            "Type" : "String",
+            "Description" : "Optional - CIDR/IP range for EcsPort and ElbPort - defaults to 0.0.0.0/0",
+            "Default" : "0.0.0.0/0"
+        },
+        "ElbPort" : {
+            "Type" : "String",
+            "Description" : "Optional - Security Group port to open on ELB - port 80 will be open by default",
+            "Default" : "80"
+        },
+        "HostPort" : {
+            "Type" : "String",
+            "Description" : "Host Port Parameter"
+        }
+    },
+    "Resources" : {
+        "taskdefinition": {
+            "Type": "AWS::ECS::TaskDefinition",
+            "Properties" : {
+                "ContainerDefinitions": [
+                    {
+                        "Name": "cloud-app",
+                        "Environment" : [
+                            {
+                                "Name" : "DB_USER",
+                                "Value" : {"Fn::FindInMap" : ["ENV", "DATABASE_USER", { "Ref" : "Environment" }]}
+                            },
+                            {
+                                "Name" : "DB_PASSWORD",
+                                "Value" : {"Fn::FindInMap" : ["ENV", "DATABASE_PASSWORD", { "Ref" : "Environment" }]}
+                            },
+                            {
+                                "Name" : "DB_SERVER",
+                                "Value" : {"Fn::FindInMap" : ["ENV", "DATABASE_SERVER", { "Ref" : "Environment" }]}
+                            },
+                            {
+                                "Name" : "APP_ID",
+                                "Value" : {"Ref" : "SiteId"}
+                            }
+                        ],
+                        "PortMappings": [
+                            {
+                                "HostPort": { "Ref" : "HostPort" },
+                                "ContainerPort": 9000
+                            }
+                        ],
+                        "Memory": "1000",
+                        "Cpu": 10,
+                        "Image": {"Ref" : "SiteId"}
+                    }
+                ]
+            }
+        },
+        "service": {
+            "Type": "AWS::ECS::Service",
+            "Properties" : {
+                "Cluster":  {"Fn::FindInMap" : [ "ENV", "CLUSTER",{ "Ref" : "Environment" }]},
+                "DesiredCount": "1",
+                "LoadBalancers": [
+                    {
+                        "ContainerName": "cloud-app",
+                        "ContainerPort": "9000",
+                        "LoadBalancerName" : { "Ref" : "EcsElasticLoadBalancer" }
+                    }
+                ],
+                "Role" : {"Ref":"ECSServiceRole"},
+                "TaskDefinition" : {"Ref":"taskdefinition"}
+            }
+        },
+        "ECSServiceRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ecs.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "ecs-service",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "elasticloadbalancing:Describe*",
+                                        "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                                        "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                                        "ec2:Describe*",
+                                        "ec2:AuthorizeSecurityGroupIngress"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "ElbSecurityGroup" : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "ELB Allowed Ports",
+                "VpcId" : { "Ref" : "VpcId" },
+                "SecurityGroupIngress" : [
+                    { "IpProtocol" : "tcp", "FromPort" : { "Ref" : "ElbPort" }, "ToPort" : { "Ref" : "ElbPort" },
+                      "CidrIp" : { "Ref" : "SourceCidr" } }
+                ]
+            }
+        },
+        "EcsElasticLoadBalancer" : {
+            "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+            "Properties" : {
+                "SecurityGroups" : [ { "Ref" : "ElbSecurityGroup" } ],
+                "Subnets" : [],
+                "CrossZone" : "true",
+                "Listeners" : [ {
+                    "LoadBalancerPort" : "80",
+                    "InstancePort" : { "Ref" : "HostPort" },
+                    "Protocol" : "HTTP"
+                } ],
+                "HealthCheck" : {
+                    "Target" : "HTTP:80/",
+                    "HealthyThreshold" : "2",
+                    "UnhealthyThreshold" : "10",
+                    "Interval" : "30",
+                    "Timeout" : "5"
+                }
+            }
+        },
+        "CustomerDns" : {
+            "Type" : "AWS::Route53::RecordSetGroup",
+            "Properties" : {
+                "HostedZoneName" : {"Fn::FindInMap" : [ "ENV", "DNSZONE",{ "Ref" : "Environment" }]},
+                "Comment" : "Zone apex alias targeted to myELB LoadBalancer.",
+                "RecordSets" : [
+                    {
+                        "Name" : { "Fn::Join" : ["", [ {"Ref" : "SiteId"},".",{"Fn::FindInMap" : [ "ENV", "DNSZONE",{ "Ref" : "Environment" }]} ] ] },
+                        "Type" : "A",
+                        "AliasTarget" : {
+                            "HostedZoneId" : { "Fn::GetAtt" : ["EcsElasticLoadBalancer", "CanonicalHostedZoneNameID"] },
+                            "DNSName" : { "Fn::GetAtt" : ["EcsElasticLoadBalancer","CanonicalHostedZoneName"] }
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

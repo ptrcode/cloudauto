@@ -1,0 +1,42 @@
+{
+  "user": {
+  },
+  "platform": {
+    "region": "us-east-1",
+    "config_bucket": "cyclops-cloud",
+    "keyname": "cyclops",
+    "ports": "https://s3.amazonaws.com/cyclops-cloud/ports.json"
+  },
+  "cluster": {
+    "keyname": "cloud",
+    "vpc": "vpc-6e6b9b0a",
+    "subnets": ["subnet-65e2e712", "subnet-21d48878"],
+    "names": {
+      "staging": "staging",
+      "production": "production"
+    }
+  },
+  "app": {
+    "template": "https://s3.amazonaws.com/cyclops-cloud/app.json"
+  },
+    "services": {
+        "db": {
+      "staging": {
+        "server": "cloud-staging.cmbk2prk21a7.us-east-1.rds.amazonaws.com",
+        "name": "cloud-staging",
+        "user": "cloud_staging",
+        "password": "cloud_staging_01"
+      },
+      "production": {
+        "server": "cloud-production.cmbk2prk21a7.us-east-1.rds.amazonaws.com",
+        "name": "cloud-production",
+        "user": "cloud_production",
+        "password": "cloud_production_01"
+      }
+    },
+    "dns": {
+      "staging": "cloud-staging.okfnlabs.org.",
+      "production": "cloud-production.okfnlabs.org."
+    }
+  }
+}

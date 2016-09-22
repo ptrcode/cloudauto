@@ -1,0 +1,202 @@
+{
+    "Parameters" : {
+        "VpcId" : {
+            "Type" : "String",
+            "Description" : "Optional - VPC Id of existing VPC. Leave blank to have a new VPC created",
+            "Default" : "",
+            "AllowedPattern" : "^(?:vpc-[0-9a-f]{8}|)$",
+            "ConstraintDescription" : "VPC Id must begin with 'vpc-' or leave blank to have a new VPC created"
+        },
+        "DesiredCapacity": {
+            "Type": "Number",
+            "Default" : "2",
+            "Description": "Number of instances to launch in your ECS cluster"
+        },
+        "MaxSize": {
+            "Type": "Number",
+            "Default" : "20",
+            "Description": "Maximum number of instances that can be launched in your ECS cluster"
+        },
+        "EcsAmiId" : {
+            "Type" : "String",
+            "Description" : "ECS AMI Id",
+            "Default": "ami-8da458e6"
+        },
+        "EcsInstanceType" : {
+            "Type" : "String",
+            "Description" : "ECS EC2 instance type",
+            "Default" : "c3.2xlarge",
+            "AllowedValues" : [ "t2.micro","t2.small","t2.medium","m3.medium","m3.large","m3.xlarge","m3.2xlarge","c4.large","c4.xlarge","c4.2xlarge","c4.4xlarge","c4.8xlarge","c3.large","c3.xlarge","c3.2xlarge","c3.4xlarge","c3.8xlarge","r3.large","r3.xlarge","r3.2xlarge","r3.4xlarge","r3.8xlarge","i2.xlarge","i2.2xlarge","i2.4xlarge","i2.8xlarge" ],
+            "ConstraintDescription" : "must be a valid EC2 instance type."
+        },
+        "EcsClusterName" : {
+            "Type" : "String",
+            "Description" : "ECS Cluster Name",
+            "Default" : ""
+        },
+        "SourceCidr" : {
+            "Type" : "String",
+            "Description" : "Optional - CIDR/IP range for EcsPort and ElbPort - defaults to 0.0.0.0/0",
+            "Default" : "0.0.0.0/0"
+        }
+    },
+    "Conditions" : {
+        "CreateVpcResources" : { "Fn::Equals" : [ { "Ref" : "VpcId" }, "" ] },
+        "ExistingVpcResources" : { "Fn::Not" : [ { "Fn::Equals" : [ { "Ref" : "VpcId" }, "" ] } ] }
+    },
+    "Resources" : {
+        "ECSAutoScalingGroup" : {
+            "Type" : "AWS::AutoScaling::AutoScalingGroup",
+            "Properties" : {
+                "VPCZoneIdentifier" : [],
+                "LaunchConfigurationName" : { "Ref" : "ContainerInstances" },
+                "MinSize" : "2",
+                "MaxSize" : "20",
+                "DesiredCapacity" : "2"
+            },
+            "CreationPolicy" : {
+                "ResourceSignal" : {
+                    "Timeout" : "PT15M"
+                }
+            },
+            "UpdatePolicy": {
+                "AutoScalingRollingUpdate": {
+                    "MinInstancesInService": "1",
+                    "MaxBatchSize": "1",
+                    "PauseTime" : "PT15M",
+                    "WaitOnResourceSignals": "true"
+                }
+            }
+        },
+        "ContainerInstances" : {
+            "Type" : "AWS::AutoScaling::LaunchConfiguration",
+            "Metadata" : {
+                "AWS::CloudFormation::Init" : {
+                    "config" : {
+
+                        "commands" : {
+                            "01_add_instance_to_cluster" : {
+                                "command" : { "Fn::Join": [ "", [ "#!/bin/bash\n", "echo ECS_CLUSTER=", { "Ref": "EcsClusterName" }, " >> /etc/ecs/ecs.config" ] ] }
+                            }
+                        },
+
+                        "files" : {
+                            "/etc/cfn/cfn-hup.conf" : {
+                                "content" : { "Fn::Join" : ["", [
+                                    "[main]\n",
+                                    "stack=", { "Ref" : "AWS::StackId" }, "\n",
+                                    "region=", { "Ref" : "AWS::Region" }, "\n"
+                                ]]},
+                                "mode"    : "000400",
+                                "owner"   : "root",
+                                "group"   : "root"
+                            },
+                            "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                                "content": { "Fn::Join" : ["", [
+                                    "[cfn-auto-reloader-hook]\n",
+                                    "triggers=post.update\n",
+                                    "path=Resources.ContainerInstances.Metadata.AWS::CloudFormation::Init\n",
+                                    "action=/opt/aws/bin/cfn-init -v ",
+                                    "         --stack ", { "Ref" : "AWS::StackName" },
+                                    "         --resource ContainerInstances ",
+                                    "         --region ", { "Ref" : "AWS::Region" }, "\n",
+                                    "runas=root\n"
+                                ]]}
+                            }
+                        },
+                        "services" : {
+                            "sysvinit" : {
+                                "cfn-hup" : { "enabled" : "true", "ensureRunning" : "true", "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"] }
+                            }
+                        }
+                    }
+                }
+            },
+            "Properties" : {
+                "ImageId" : { "Ref" : "EcsAmiId" },
+                "InstanceType" : { "Ref" : "EcsInstanceType" },
+                "IamInstanceProfile": "ecsInstanceRole",
+                "AssociatePublicIpAddress" : true,
+                "SecurityGroups" : [ { "Ref" : "EcsSecurityGroup" } ],
+                "KeyName"        : "",
+                "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+                    "#!/bin/bash -xe\n",
+                    "yum install -y aws-cfn-bootstrap\n",
+
+                    "/opt/aws/bin/cfn-init -v ",
+                    "         --stack ", { "Ref" : "AWS::StackName" },
+                    "         --resource ContainerInstances ",
+                    "         --region ", { "Ref" : "AWS::Region" }, "\n",
+
+                    "/opt/aws/bin/cfn-signal -e $? ",
+                    "         --stack ", { "Ref" : "AWS::StackName" },
+                    "         --resource ECSAutoScalingGroup ",
+                    "         --region ", { "Ref" : "AWS::Region" }, "\n"
+                ]]}}
+            }
+        },
+        "EcsSecurityGroup" : {
+            "Type" : "AWS::EC2::SecurityGroup",
+            "Properties" : {
+                "GroupDescription" : "ECS Allowed Ports",
+                "VpcId" : { "Ref" : "VpcId" },
+                "SecurityGroupIngress" : {
+                    "IpProtocol" : "tcp", "FromPort" : "1", "ToPort" : "65535",
+                    "CidrIp" : { "Ref" : "SourceCidr" } }
+            }
+        },
+        "EC2Role": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "ec2.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "Path": "/",
+                "Policies": [
+                    {
+                        "PolicyName": "ecs-service",
+                        "PolicyDocument": {
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ecs:CreateCluster",
+                                        "ecs:RegisterContainerInstance",
+                                        "ecs:DeregisterContainerInstance",
+                                        "ecs:DiscoverPollEndpoint",
+                                        "ecs:Submit*",
+                                        "ecs:Poll"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "EC2InstanceProfile": {
+            "Type": "AWS::IAM::InstanceProfile",
+            "Properties": {
+                "Path": "/",
+                "Roles": [
+                    {
+                        "Ref": "EC2Role"
+                    }
+                ]
+            }
+        }
+    }
+}

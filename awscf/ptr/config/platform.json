@@ -1,0 +1,139 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description" : "AWS CloudFormation template to create a new VPC or use an existing VPC for ECS deployment",
+    "Mappings" : {
+        "VpcCidrs" : {
+            "eu-central-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "sa-east-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "ap-northeast-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "eu-west-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "us-east-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "us-west-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "us-west-2" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "ap-southeast-2" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" },
+            "ap-southeast-1" : { "vpc" : "10.0.0.0/16", "stagingsubnet" : "10.0.0.0/24", "productionsubnet" : "10.0.1.0/24" }
+        }
+    },
+    "Parameters" : {
+        "VpcId" : {
+            "Type" : "String",
+            "Description" : "Optional - VPC Id of existing VPC. Leave blank to have a new VPC created",
+            "Default" : "",
+            "AllowedPattern" : "^(?:vpc-[0-9a-f]{8}|)$",
+            "ConstraintDescription" : "VPC Id must begin with 'vpc-' or leave blank to have a new VPC created"
+        },
+
+        "SubnetIds" : {
+            "Type" : "CommaDelimitedList",
+            "Description" : "Optional - Comma separated list of existing VPC Subnet Ids where ECS instances will run",
+            "Default" : ""
+        },
+        "VpcAvailabilityZones" : {
+            "Type" : "CommaDelimitedList",
+            "Description" : "Optional : Comma-delimited list of two VPC availability zones in which to create subnets",
+            "Default" : ""
+        },
+        "SourceCidr" : {
+            "Type" : "String",
+            "Description" : "Optional - CIDR/IP range for EcsPort and ElbPort - defaults to 0.0.0.0/0",
+            "Default" : "0.0.0.0/0"
+        }
+    },
+    "Conditions" : {
+        "CreateVpcResources" : { "Fn::Equals" : [ { "Ref" : "VpcId" }, "" ] },
+        "ExistingVpcResources" : { "Fn::Not" : [ { "Fn::Equals" : [ { "Ref" : "VpcId" }, "" ] } ] },
+        "UseSpecifiedVpcAvailabilityZones" : { "Fn::Not" : [ { "Fn::Equals" : [ { "Fn::Join" : [ "", { "Ref" : "VpcAvailabilityZones" } ] }, "" ] } ] }
+    },
+    "Resources" : {
+        "Vpc" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::VPC",
+            "Properties" : {
+                "CidrBlock" : { "Fn::FindInMap" : [ "VpcCidrs", { "Ref" : "AWS::Region" }, "vpc" ] },
+                "EnableDnsSupport" : "true",
+                "EnableDnsHostnames" : "true",
+                "Tags" : [ {"Key" : "name", "Value" : "vpc-cloud"} ]
+            }
+        },
+        "StagingSubnetZone" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::Subnet",
+            "Description" : "Optional : Staging Subnets",
+            "Properties" : {
+                "VpcId" : { "Ref" : "Vpc" },
+                "CidrBlock" : { "Fn::FindInMap" : [ "VpcCidrs", { "Ref" : "AWS::Region" }, "stagingsubnet" ] },
+                "AvailabilityZone" : {
+                    "Fn::If" : [
+                        "UseSpecifiedVpcAvailabilityZones",
+                        { "Fn::Select" : [ "0", { "Ref" : "VpcAvailabilityZones" } ] },
+                        { "Fn::Select" : [ "0", { "Fn::GetAZs" : { "Ref" : "AWS::Region" } } ] }
+                    ]
+                }
+            }
+        },
+        "ProductionSubnetZone" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::Subnet",
+            "Properties" : {
+                "VpcId" : { "Ref" : "Vpc" },
+                "CidrBlock" : { "Fn::FindInMap" : [ "VpcCidrs", { "Ref" : "AWS::Region" }, "productionsubnet" ] },
+                "AvailabilityZone" : {
+                    "Fn::If" : [
+                        "UseSpecifiedVpcAvailabilityZones",
+                        { "Fn::Select" : [ "1", { "Ref" : "VpcAvailabilityZones" } ] },
+                        { "Fn::Select" : [ "1", { "Fn::GetAZs" : { "Ref" : "AWS::Region" } } ] }
+                    ]
+                }
+            }
+        },
+
+        "InternetGateway" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::InternetGateway"
+        },
+
+        "AttachGateway" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::VPCGatewayAttachment",
+            "Properties" : {
+                "VpcId" : { "Ref" : "Vpc" },
+                "InternetGatewayId" : { "Ref" : "InternetGateway" }
+            }
+        },
+
+        "RouteViaIgw" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::RouteTable",
+            "Properties" : {
+                "VpcId" : {"Ref" : "Vpc"}
+            }
+        },
+
+        "PublicRouteViaIgw" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::Route",
+            "Properties" : {
+                "RouteTableId" : { "Ref" : "RouteViaIgw" },
+                "DestinationCidrBlock" : "0.0.0.0/0",
+                "GatewayId" : { "Ref" : "InternetGateway" }
+            }
+        },
+
+        "StagingSubnetRouteTableAssociation" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : { "Ref" : "StagingSubnetZone" },
+                "RouteTableId" : { "Ref" : "RouteViaIgw" }
+            }
+        },
+        "ProductionSubnetRouteTableAssociation" : {
+            "Condition" : "CreateVpcResources",
+            "Type" : "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties" : {
+                "SubnetId" : { "Ref" : "ProductionSubnetZone" },
+                "RouteTableId" : { "Ref" : "RouteViaIgw" }
+            }
+        }
+    }
+}

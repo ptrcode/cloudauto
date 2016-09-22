@@ -1,0 +1,3 @@
+vmname,templateName,physicalHost,datastore,MemoryMB,ResorcePool,FolderLocation,networkName,ipAddress,NetMask,Gateway,vmnetwork,dns
+vm1-test,devop-rhel6.5-test,cryesxi720a.medfusion.local,cry_vmdk_ds01,4096,Westmere EVC Cluster,devopautomation,DEVServers,172.18.82.78,255.255.255.0,172.18.82.254,DEVServers,172.18.81.198
+vm2-test,devop-rhel6.5-test,cryesxi720a.medfusion.local,cry_vmdk_ds01,4096,Westmere EVC Cluster,devopautomation,DEVServers,172.18.82.79,255.255.255.0,172.18.82.254,DEVServers,172.18.81.198

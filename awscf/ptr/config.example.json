@@ -1,0 +1,44 @@
+{
+  "user": {
+    "key": "",
+    "secret": ""
+  },
+  "platform": {
+    "region": "us-east-1",
+    "config_bucket": "cyclops-cloud",
+    "keyname": "cyclops",
+    "ports": ""
+  },
+  "cluster": {
+    "keyname": "cloud",
+    "vpc": "",
+    "subnets": [],
+    "names": {
+      "staging": "staging",
+      "production": "production"
+    }
+  },
+  "app": {
+    "template": ""
+  },
+  "services": {
+    "db": {
+      "staging": {
+        "server": "",
+        "name": "",
+        "user": "",
+        "password": ""
+      },
+      "production": {
+        "server": "",
+        "name": "",
+        "user": "",
+        "password": ""
+      }
+    },
+    "dns": {
+      "staging": "cloud-staging.okfnlabs.org.",
+      "production": "cloud-production.okfnlabs.org."
+    }
+  }
+}
